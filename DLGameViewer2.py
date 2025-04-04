@@ -1036,7 +1036,7 @@ class GameViewerGUI:
         self.total_pages = 1
         
         self.viewer = DLGameViewer()  # DLGameViewer 인스턴스를 클래스 멤버로 저장
-        self.viewer.process_folders()  # 초기 데이터 수집
+        # 초기 자동 스캔 제거 (self.viewer.process_folders() 호출 제거)
         
         # 화면 구성은 별도 스레드에서 완료 후 호출
         threading.Thread(target=self.delayed_init, daemon=True).start()
@@ -1070,6 +1070,14 @@ class GameViewerGUI:
         # 메뉴 프레임 추가
         self.menu_frame = ctk.CTkFrame(self.window)
         self.menu_frame.pack(fill="x", padx=10, pady=(10,0))
+        
+        # 스캔 버튼 추가 - 코드 없는 게임 처리 버튼 왼쪽에 배치
+        self.scan_btn = ctk.CTkButton(
+            self.menu_frame,
+            text="스캔",
+            command=self.scan_games
+        )
+        self.scan_btn.pack(side="left", padx=5)
         
         # 게임 코드 없는 폴더 처리 버튼 추가
         self.process_invalid_btn = ctk.CTkButton(
@@ -1179,7 +1187,71 @@ class GameViewerGUI:
             t = threading.Thread(target=self.image_loader_thread, daemon=True)
             t.start()
             self.image_threads.append(t)
+
+    def scan_games(self):
+        """게임 폴더 스캔 및 정보 수집"""
+        # 스캔 버튼 비활성화 및 텍스트 변경
+        self.scan_btn.configure(state="disabled", text="스캔 중...")
+        self.window.update()
+        
+        # 백그라운드 스레드에서 스캔 작업 수행
+        threading.Thread(target=self.perform_scan, daemon=True).start()
     
+    def perform_scan(self):
+        """백그라운드에서 게임 스캔 수행"""
+        try:
+            # 게임 폴더 처리
+            self.viewer.process_folders()
+            
+            # UI 업데이트는 메인 스레드에서 수행
+            self.window.after(0, self.scan_complete)
+            
+        except Exception as e:
+            # 오류 발생 시 UI에 메시지 표시
+            self.window.after(0, lambda e=e: self.scan_error(e))
+    
+    def scan_complete(self):
+        """스캔 완료 후 처리"""
+        # 데이터 다시 로드
+        self.preload_data()
+        
+        # 화면 갱신
+        self.refresh_display()
+        
+        # 스캔 버튼 다시 활성화
+        self.scan_btn.configure(state="normal", text="스캔")
+        
+        # 결과 메시지 표시
+        invalid_count = len(self.viewer.invalid_folders)
+        no_exe_count = len(self.viewer.no_exe_folders)
+        skipped_count = len(self.viewer.skipped_folders)
+        
+        message = f"스캔 완료!\n\n"
+        if skipped_count > 0:
+            message += f"기존 등록 폴더: {skipped_count}개\n"
+        if invalid_count > 0:
+            message += f"게임 코드 없는 폴더: {invalid_count}개\n"
+        if no_exe_count > 0:
+            message += f"실행 파일 없는 폴더: {no_exe_count}개\n"
+        
+        SafeCTkMessagebox(
+            title="스캔 결과",
+            message=message,
+            icon="info"
+        )
+    
+    def scan_error(self, error):
+        """스캔 오류 처리"""
+        # 스캔 버튼 다시 활성화
+        self.scan_btn.configure(state="normal", text="스캔")
+        
+        # 오류 메시지 표시
+        SafeCTkMessagebox(
+            title="스캔 오류",
+            message=f"게임 스캔 중 오류가 발생했습니다:\n{str(error)}",
+            icon="cancel"
+        )
+        
     def image_loader_thread(self):
         """이미지를 백그라운드에서 로드하는 스레드"""
         while True:
