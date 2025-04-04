@@ -63,7 +63,10 @@ def resize_image_maintain_aspect(image, target_size):
 
 class DLGameViewer:
     def __init__(self):
-        self.game_path = r"D:\_AboutHen\_Game"
+        # 게임 경로 관련 변경
+        self.game_paths = []
+        self.load_game_paths()  # 저장된 게임 경로 로드
+        
         # URL 딕셔너리로 변경
         self.base_urls = {
             "RJ": "https://www.dlsite.com/maniax/work/=/product_id/{}.html",
@@ -86,7 +89,42 @@ class DLGameViewer:
         }
         
         self.init_database()
-        
+    
+    def load_game_paths(self):
+        """설정 파일에서 게임 경로 목록 로드"""
+        try:
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                    self.game_paths = settings.get("game_paths", [])
+            
+            # 기본 경로 추가 (설정 파일이 없거나 game_paths가 비어있는 경우)
+            if not self.game_paths:
+                default_path = r"D:\_AboutHen\_Game"
+                if os.path.exists(default_path):
+                    self.game_paths = [default_path]
+                    self.save_game_paths()
+        except Exception as e:
+            print(f"게임 경로 로드 중 오류: {e}")
+            # 오류 발생 시 기본 경로 사용
+            self.game_paths = [r"D:\_AboutHen\_Game"]
+            self.save_game_paths()
+    
+    def save_game_paths(self):
+        """설정 파일에 게임 경로 목록 저장"""
+        try:
+            settings = {}
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            
+            settings["game_paths"] = self.game_paths
+            
+            with open("settings.json", "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"게임 경로 저장 중 오류: {e}")
+
     def init_database(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -259,58 +297,64 @@ class DLGameViewer:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        for folder_name in os.listdir(self.game_path):
-            folder_path = os.path.join(self.game_path, folder_name)
-            if not os.path.isdir(folder_path):
+        # 모든 게임 경로에 대해 처리
+        for game_path in self.game_paths:
+            if not os.path.exists(game_path):
+                print(f"경로가 존재하지 않습니다: {game_path}")
                 continue
                 
-            game_code = self.extract_game_code(folder_name)
-            
-            # 이미 등록된 게임 확인 - folder_path로 확인
-            cursor.execute("""
-                SELECT 1 FROM games 
-                WHERE folder_path = ?
-            """, (folder_path,))
-            if cursor.fetchone():
-                self.skipped_folders.append(folder_name)
-                continue
-            
-            # 게임 코드가 없는 경우 invalid_folders에 추가
-            if not game_code:
-                self.invalid_folders.append(folder_path)
-                continue
-            
-            # 새 게임 정보 수집 및 저장
-            game_info = self.scrape_game_info(game_code, folder_path)
-            if game_info:
-                # exe 파일 목록 가져오기
-                exe_files = self.get_exe_files(folder_path)
-                exe_list = json.loads(exe_files)
+            for folder_name in os.listdir(game_path):
+                folder_path = os.path.join(game_path, folder_name)
+                if not os.path.isdir(folder_path):
+                    continue
+                    
+                game_code = self.extract_game_code(folder_name)
                 
-                # exe 파일이 없는 경우 처리
-                if not exe_list:
-                    self.no_exe_folders.append(folder_name)
+                # 이미 등록된 게임 확인 - folder_path로 확인
+                cursor.execute("""
+                    SELECT 1 FROM games 
+                    WHERE folder_path = ?
+                """, (folder_path,))
+                if cursor.fetchone():
+                    self.skipped_folders.append(folder_name)
                     continue
                 
-                cursor.execute('''
-                INSERT INTO games 
-                (game_code, title, rating, circle, work_type, genres, cover_image, folder_path, exe_files)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    game_info['game_code'],
-                    game_info['title'],
-                    game_info['rating'],
-                    game_info['circle'],
-                    game_info['work_type'],
-                    game_info['genres'],
-                    game_info['cover_image'],
-                    folder_path,
-                    exe_files
-                ))
-                conn.commit()
-            else:
-                # 정보 수집 실패한 경우도 invalid_folders에 추가
-                self.invalid_folders.append(folder_path)
+                # 게임 코드가 없는 경우 invalid_folders에 추가
+                if not game_code:
+                    self.invalid_folders.append(folder_path)
+                    continue
+                
+                # 새 게임 정보 수집 및 저장
+                game_info = self.scrape_game_info(game_code, folder_path)
+                if game_info:
+                    # exe 파일 목록 가져오기
+                    exe_files = self.get_exe_files(folder_path)
+                    exe_list = json.loads(exe_files)
+                    
+                    # exe 파일이 없는 경우 처리
+                    if not exe_list:
+                        self.no_exe_folders.append(folder_name)
+                        continue
+                    
+                    cursor.execute('''
+                    INSERT INTO games 
+                    (game_code, title, rating, circle, work_type, genres, cover_image, folder_path, exe_files)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        game_info['game_code'],
+                        game_info['title'],
+                        game_info['rating'],
+                        game_info['circle'],
+                        game_info['work_type'],
+                        game_info['genres'],
+                        game_info['cover_image'],
+                        folder_path,
+                        exe_files
+                    ))
+                    conn.commit()
+                else:
+                    # 정보 수집 실패한 경우도 invalid_folders에 추가
+                    self.invalid_folders.append(folder_path)
         
         conn.close()
         
@@ -1095,6 +1139,14 @@ class GameViewerGUI:
         )
         self.check_duplicates_btn.pack(side="left", padx=5)
         
+        # 폴더 관리 버튼 추가
+        self.folder_manage_btn = ctk.CTkButton(
+            self.menu_frame,
+            text="폴더관리",
+            command=self.open_folder_management
+        )
+        self.folder_manage_btn.pack(side="left", padx=5)
+        
         # 검색 프레임 추가
         self.search_frame = ctk.CTkFrame(self.window)
         self.search_frame.pack(fill="x", padx=10, pady=(10,0))
@@ -1767,6 +1819,176 @@ class GameViewerGUI:
 
     def run(self):
         self.window.mainloop()
+
+    def open_folder_management(self):
+        """폴더 관리 다이얼로그 열기"""
+        FolderManagementDialog(self.window, self.viewer, self.refresh_folder_settings)
+    
+    def refresh_folder_settings(self):
+        """폴더 설정 변경 후 갱신"""
+        # DB에서 데이터 다시 로드
+        self.preload_data()
+        
+        # UI 갱신
+        self.refresh_display()
+
+class FolderManagementDialog:
+    def __init__(self, parent, viewer, refresh_callback=None):
+        self.dialog = ctk.CTkToplevel(parent)
+        self.dialog.title("폴더 관리")
+        self.dialog.geometry("700x500")
+        
+        # 모달 창으로 설정
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        self.viewer = viewer
+        self.refresh_callback = refresh_callback
+        
+        # 메인 프레임
+        self.main_frame = ctk.CTkFrame(self.dialog)
+        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # 안내 텍스트
+        ctk.CTkLabel(
+            self.main_frame, 
+            text="게임 폴더 목록", 
+            font=("Arial", 16, "bold")
+        ).pack(pady=(0, 10))
+        
+        # 폴더 목록 프레임
+        self.folder_list_frame = ctk.CTkScrollableFrame(self.main_frame)
+        self.folder_list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # 폴더 목록 표시
+        self.refresh_folder_list()
+        
+        # 버튼 프레임
+        button_frame = ctk.CTkFrame(self.main_frame)
+        button_frame.pack(fill="x", pady=10)
+        
+        # 폴더 추가 버튼
+        add_btn = ctk.CTkButton(
+            button_frame, 
+            text="폴더 추가", 
+            command=self.add_folder
+        )
+        add_btn.pack(side="left", padx=5)
+        
+        # 저장 버튼
+        save_btn = ctk.CTkButton(
+            button_frame, 
+            text="저장", 
+            command=self.save_settings
+        )
+        save_btn.pack(side="right", padx=5)
+    
+    def refresh_folder_list(self):
+        """폴더 목록 새로고침"""
+        # 기존 폴더 목록 위젯 제거
+        for widget in self.folder_list_frame.winfo_children():
+            widget.destroy()
+        
+        # 폴더 목록이 비어있는 경우
+        if not self.viewer.game_paths:
+            ctk.CTkLabel(
+                self.folder_list_frame,
+                text="등록된 폴더가 없습니다. 폴더 추가 버튼을 눌러 게임 폴더를 추가하세요.",
+                wraplength=600
+            ).pack(pady=20)
+            return
+        
+        # 각 폴더에 대한 행 추가
+        for i, folder_path in enumerate(self.viewer.game_paths):
+            row_frame = ctk.CTkFrame(self.folder_list_frame)
+            row_frame.pack(fill="x", pady=5)
+            
+            # 폴더 경로 레이블
+            path_label = ctk.CTkLabel(
+                row_frame,
+                text=folder_path,
+                anchor="w",
+                wraplength=550
+            )
+            path_label.pack(side="left", fill="x", expand=True, padx=5)
+            
+            # 삭제 버튼
+            delete_btn = ctk.CTkButton(
+                row_frame,
+                text="X",
+                width=30,
+                command=lambda idx=i: self.remove_folder(idx)
+            )
+            delete_btn.pack(side="right", padx=5)
+    
+    def add_folder(self):
+        """게임 폴더 추가"""
+        from tkinter import filedialog
+        
+        # 폴더 선택 다이얼로그
+        folder_path = filedialog.askdirectory(
+            title="게임 폴더 선택",
+            initialdir=os.path.expanduser("~")
+        )
+        
+        if folder_path:
+            # 중복 확인
+            if folder_path in self.viewer.game_paths:
+                SafeCTkMessagebox(
+                    master=self.dialog,
+                    title="중복",
+                    message="이미 등록된 폴더입니다.",
+                    icon="warning"
+                )
+                return
+            
+            # 경로 추가
+            self.viewer.game_paths.append(folder_path)
+            
+            # 목록 갱신
+            self.refresh_folder_list()
+    
+    def remove_folder(self, index):
+        """폴더 제거"""
+        if 0 <= index < len(self.viewer.game_paths):
+            # 확인 메시지
+            folder_path = self.viewer.game_paths[index]
+            msg = CTkMessagebox(
+                master=self.dialog,
+                title="폴더 제거",
+                message=f"다음 폴더를 목록에서 제거하시겠습니까?\n\n{folder_path}",
+                icon="question",
+                option_1="취소",
+                option_2="제거"
+            )
+            
+            result = msg.get()
+            if result == "제거":
+                # 목록에서 제거
+                del self.viewer.game_paths[index]
+                
+                # 목록 갱신
+                self.refresh_folder_list()
+    
+    def save_settings(self):
+        """설정 저장"""
+        # 설정 저장
+        self.viewer.save_game_paths()
+        
+        # 메시지 표시
+        SafeCTkMessagebox(
+            master=self.dialog,
+            title="저장 완료",
+            message="폴더 설정이 저장되었습니다.",
+            icon="check"
+        )
+        
+        # 콜백 함수 호출
+        if self.refresh_callback:
+            self.refresh_callback()
+        
+        # 다이얼로그 닫기
+        self.dialog.destroy()
 
 if __name__ == "__main__":
     # GUI 실행 (DLGameViewer 인스턴스 생성은 GUI 클래스 내부로 이동)
