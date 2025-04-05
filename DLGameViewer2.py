@@ -1079,6 +1079,9 @@ class GameViewerGUI:
         self.window.title("DL Game Viewer")
         self.window.geometry("800x600")
         
+        # DB 경로 설정
+        self.db_path = "games.db"
+        
         # 로딩 표시를 위한 프레임
         self.loading_frame = ctk.CTkFrame(self.window)
         self.loading_label = ctk.CTkLabel(self.loading_frame, text="로딩 중...", font=("Arial", 20))
@@ -1115,7 +1118,7 @@ class GameViewerGUI:
     
     def preload_data(self):
         """초기 데이터 로드"""
-        conn = sqlite3.connect("games.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # 여기서는 기본 정보만 가져오고 이미지는 필요할 때 로드
@@ -1166,6 +1169,14 @@ class GameViewerGUI:
             command=self.open_folder_management
         )
         self.folder_manage_btn.pack(side="left", padx=5)
+        
+        # DB 정리 버튼 추가
+        self.clean_db_btn = ctk.CTkButton(
+            self.menu_frame,
+            text="DB정리",
+            command=self.clean_database
+        )
+        self.clean_db_btn.pack(side="left", padx=5)
         
         # 검색 프레임 추가
         self.search_frame = ctk.CTkFrame(self.window)
@@ -1859,6 +1870,96 @@ class GameViewerGUI:
         if self.selected_frame:
             self.selected_frame.configure(border_width=0)
             self.selected_frame = None
+
+    def clean_database(self):
+        """DB 정리 - 존재하지 않는 폴더에 대한 레코드 삭제"""
+        # DB 정리 확인 메시지
+        confirm_msg = CTkMessagebox(
+            master=self.window,
+            title="DB 정리 확인",
+            message="DB에서 존재하지 않는 폴더의 게임 정보를 삭제하시겠습니까?",
+            icon="question",
+            option_1="취소",
+            option_2="확인"
+        )
+        
+        result = confirm_msg.get()
+        if result != "확인":
+            return
+        
+        # DB 정리 작업 시작
+        self.clean_db_btn.configure(state="disabled", text="정리 중...")
+        self.window.update()
+        
+        # 백그라운드 스레드에서 DB 정리 작업 수행
+        threading.Thread(target=self.perform_db_cleaning, daemon=True).start()
+    
+    def perform_db_cleaning(self):
+        """백그라운드에서 DB 정리 작업 수행"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 모든 게임 레코드 가져오기
+            cursor.execute("SELECT id, folder_path FROM games")
+            all_records = cursor.fetchall()
+            
+            deleted_count = 0
+            for record_id, folder_path in all_records:
+                # 폴더 경로 정규화
+                normalized_path = os.path.normpath(folder_path)
+                
+                # 폴더가 존재하는지 확인
+                if not os.path.exists(normalized_path) or not os.path.isdir(normalized_path):
+                    # 존재하지 않는 폴더의 레코드 삭제
+                    cursor.execute("DELETE FROM games WHERE id = ?", (record_id,))
+                    deleted_count += 1
+            
+            # 변경사항 저장
+            conn.commit()
+            conn.close()
+            
+            # UI 업데이트는 메인 스레드에서 수행
+            self.window.after(0, lambda: self.db_cleaning_complete(deleted_count))
+            
+        except Exception as e:
+            # 오류 발생 시 UI에 메시지 표시
+            self.window.after(0, lambda e=e: self.db_cleaning_error(e))
+    
+    def db_cleaning_complete(self, deleted_count):
+        """DB 정리 완료 처리"""
+        # 버튼 상태 복원
+        self.clean_db_btn.configure(state="normal", text="DB정리")
+        
+        # 데이터 다시 로드
+        self.preload_data()
+        
+        # UI 갱신
+        self.refresh_display()
+        
+        # 결과 메시지 표시
+        if deleted_count > 0:
+            result_msg = f"DB 정리가 완료되었습니다.\n삭제된 레코드 수: {deleted_count}개"
+        else:
+            result_msg = "삭제할 레코드가 없습니다. 모든 폴더가 정상적으로 존재합니다."
+        
+        SafeCTkMessagebox(
+            title="DB 정리 완료",
+            message=result_msg,
+            icon="info"
+        )
+    
+    def db_cleaning_error(self, error):
+        """DB 정리 오류 처리"""
+        # 버튼 상태 복원
+        self.clean_db_btn.configure(state="normal", text="DB정리")
+        
+        # 오류 메시지 표시
+        SafeCTkMessagebox(
+            title="DB 정리 오류",
+            message=f"DB 정리 중 오류가 발생했습니다:\n{str(error)}",
+            icon="cancel"
+        )
 
 class FolderManagementDialog:
     def __init__(self, parent, viewer, refresh_callback=None):
