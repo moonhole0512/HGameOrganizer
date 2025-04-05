@@ -96,18 +96,19 @@ class DLGameViewer:
             if os.path.exists("settings.json"):
                 with open("settings.json", "r", encoding="utf-8") as f:
                     settings = json.load(f)
-                    self.game_paths = settings.get("game_paths", [])
+                    # 경로를 정규화하여 로드
+                    self.game_paths = [os.path.normpath(path) for path in settings.get("game_paths", [])]
             
             # 기본 경로 추가 (설정 파일이 없거나 game_paths가 비어있는 경우)
             if not self.game_paths:
                 default_path = r"D:\_AboutHen\_Game"
                 if os.path.exists(default_path):
-                    self.game_paths = [default_path]
+                    self.game_paths = [os.path.normpath(default_path)]
                     self.save_game_paths()
         except Exception as e:
             print(f"게임 경로 로드 중 오류: {e}")
             # 오류 발생 시 기본 경로 사용
-            self.game_paths = [r"D:\_AboutHen\_Game"]
+            self.game_paths = [os.path.normpath(r"D:\_AboutHen\_Game")]
             self.save_game_paths()
     
     def save_game_paths(self):
@@ -118,7 +119,8 @@ class DLGameViewer:
                 with open("settings.json", "r", encoding="utf-8") as f:
                     settings = json.load(f)
             
-            settings["game_paths"] = self.game_paths
+            # 경로를 정규화하여 저장
+            settings["game_paths"] = [os.path.normpath(path) for path in self.game_paths]
             
             with open("settings.json", "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=4)
@@ -297,6 +299,11 @@ class DLGameViewer:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # DB에서 현재 등록된 모든 폴더 경로를 가져옴
+        cursor.execute("SELECT folder_path FROM games")
+        # 경로 슬래시를 윈도우 형식으로 정규화하여 저장
+        registered_folders = set([os.path.normpath(row[0]) for row in cursor.fetchall()])
+        
         # 모든 게임 경로에 대해 처리
         for game_path in self.game_paths:
             if not os.path.exists(game_path):
@@ -305,24 +312,25 @@ class DLGameViewer:
                 
             for folder_name in os.listdir(game_path):
                 folder_path = os.path.join(game_path, folder_name)
+                # 경로 슬래시를 윈도우 형식으로 정규화
+                folder_path = os.path.normpath(folder_path)
+                
                 if not os.path.isdir(folder_path):
+                    continue
+                
+                # 이미 DB에 등록된 경로인지 확인 - 정규화된 경로로 비교
+                if folder_path in registered_folders:
+                    self.skipped_folders.append(folder_name)
                     continue
                     
                 game_code = self.extract_game_code(folder_name)
-                
-                # 이미 등록된 게임 확인 - folder_path로 확인
-                cursor.execute("""
-                    SELECT 1 FROM games 
-                    WHERE folder_path = ?
-                """, (folder_path,))
-                if cursor.fetchone():
-                    self.skipped_folders.append(folder_name)
-                    continue
                 
                 # 게임 코드가 없는 경우 invalid_folders에 추가
                 if not game_code:
                     self.invalid_folders.append(folder_path)
                     continue
+                
+                # 게임 코드 기반 중복 체크 제거 (사용자가 직접 중복체크 버튼으로 관리)
                 
                 # 새 게임 정보 수집 및 저장
                 game_info = self.scrape_game_info(game_code, folder_path)
@@ -348,10 +356,12 @@ class DLGameViewer:
                         game_info['work_type'],
                         game_info['genres'],
                         game_info['cover_image'],
-                        folder_path,
+                        folder_path,  # 정규화된 경로 저장
                         exe_files
                     ))
                     conn.commit()
+                    # 등록 완료된 폴더 경로를 추가
+                    registered_folders.add(folder_path)
                 else:
                     # 정보 수집 실패한 경우도 invalid_folders에 추가
                     self.invalid_folders.append(folder_path)
@@ -369,6 +379,11 @@ class DLGameViewer:
         if self.no_exe_folders:
             print("\n실행 파일이 없는 폴더:")
             for folder in self.no_exe_folders:
+                print(f"- {folder}")
+                
+        if self.skipped_folders:
+            print("\n건너뛴 폴더:")
+            for folder in self.skipped_folders:
                 print(f"- {folder}")
 
 class ExeSelectionDialog:
@@ -1932,8 +1947,12 @@ class FolderManagementDialog:
         )
         
         if folder_path:
-            # 중복 확인
-            if folder_path in self.viewer.game_paths:
+            # 경로 슬래시를 윈도우 형식으로 정규화
+            folder_path = os.path.normpath(folder_path)
+            
+            # 중복 확인 - 정규화된 경로로 비교
+            normalized_paths = [os.path.normpath(path) for path in self.viewer.game_paths]
+            if folder_path in normalized_paths:
                 SafeCTkMessagebox(
                     master=self.dialog,
                     title="중복",
