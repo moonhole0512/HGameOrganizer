@@ -381,10 +381,10 @@ class DLGameViewer:
             for folder in self.no_exe_folders:
                 print(f"- {folder}")
                 
-        if self.skipped_folders:
-            print("\n건너뛴 폴더:")
-            for folder in self.skipped_folders:
-                print(f"- {folder}")
+        #if self.skipped_folders:
+        #    print("\n건너뛴 폴더:")
+        #    for folder in self.skipped_folders:
+        #        print(f"- {folder}")
 
 class ExeSelectionDialog:
     def __init__(self, parent, exe_files, game_id):
@@ -1184,7 +1184,9 @@ class GameViewerGUI:
             
             entry = ctk.CTkEntry(field_frame, placeholder_text=f"{placeholder} 검색...")
             entry.pack(fill="x", padx=5, pady=(0,5))
-            entry.bind('<Return>', self.perform_search)  # KeyRelease 대신 Return 이벤트로 변경
+            entry.bind('<Return>', self.perform_search)  # 엔터 키 바인딩 추가
+            # 검색 텍스트 박스에 포커스 시 하이라이트 해제
+            entry.bind('<FocusIn>', self.clear_selection)
             self.search_entries[field] = entry
         
         # 정렬 옵션 프레임 추가
@@ -1846,6 +1848,12 @@ class GameViewerGUI:
         
         # UI 갱신
         self.refresh_display()
+
+    def clear_selection(self, event=None):
+        """검색 텍스트 박스 선택 시 하이라이트된 프레임 해제"""
+        if self.selected_frame:
+            self.selected_frame.configure(border_width=0)
+            self.selected_frame = None
 
 class FolderManagementDialog:
     def __init__(self, parent, viewer, refresh_callback=None):
