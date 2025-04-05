@@ -296,6 +296,11 @@ class DLGameViewer:
         return json.dumps(exe_files, ensure_ascii=False)  # JSON 형식으로 저장
 
     def process_folders(self):
+        # 스캔 시작 전에 관련 리스트 초기화
+        self.invalid_folders = []
+        self.no_exe_folders = []
+        self.skipped_folders = []
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
