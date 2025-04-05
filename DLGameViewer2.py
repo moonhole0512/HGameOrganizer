@@ -1903,13 +1903,13 @@ class FolderManagementDialog:
         )
         add_btn.pack(side="left", padx=5)
         
-        # 저장 버튼
-        save_btn = ctk.CTkButton(
+        # 닫기 버튼 (저장 버튼을 닫기 버튼으로 변경)
+        close_btn = ctk.CTkButton(
             button_frame, 
-            text="저장", 
-            command=self.save_settings
+            text="닫기", 
+            command=self.close_dialog
         )
-        save_btn.pack(side="right", padx=5)
+        close_btn.pack(side="right", padx=5)
     
     def refresh_folder_list(self):
         """폴더 목록 새로고침"""
@@ -1977,8 +1977,18 @@ class FolderManagementDialog:
             # 경로 추가
             self.viewer.game_paths.append(folder_path)
             
+            # 즉시 설정 저장
+            self.viewer.save_game_paths()
+            
             # 목록 갱신
             self.refresh_folder_list()
+            
+            # 콜백 호출 - 폴더 추가 후 즉시 UI 갱신
+            if self.refresh_callback:
+                self.refresh_callback()
+            
+            # 알림 메시지 (작은 토스트 메시지로 변경)
+            self.show_toast("폴더가 추가되었습니다.")
     
     def remove_folder(self, index):
         """폴더 제거"""
@@ -1999,26 +2009,51 @@ class FolderManagementDialog:
                 # 목록에서 제거
                 del self.viewer.game_paths[index]
                 
+                # 즉시 설정 저장
+                self.viewer.save_game_paths()
+                
                 # 목록 갱신
                 self.refresh_folder_list()
+                
+                # 콜백 호출 - 폴더 제거 후 즉시 UI 갱신
+                if self.refresh_callback:
+                    self.refresh_callback()
+                
+                # 알림 메시지 (작은 토스트 메시지로 변경)
+                self.show_toast("폴더가 제거되었습니다.")
     
-    def save_settings(self):
-        """설정 저장"""
-        # 설정 저장
-        self.viewer.save_game_paths()
+    def show_toast(self, message):
+        """작은 토스트 메시지 표시"""
+        # 작은 알림 메시지를 화면 하단에 잠시 표시
+        toast = ctk.CTkToplevel(self.dialog)
+        toast.attributes("-topmost", True)
+        toast.overrideredirect(True)  # 제목 표시줄 없음
         
-        # 메시지 표시
-        SafeCTkMessagebox(
-            master=self.dialog,
-            title="저장 완료",
-            message="폴더 설정이 저장되었습니다.",
-            icon="check"
-        )
+        # 알림 라벨
+        label = ctk.CTkLabel(toast, text=message, padx=20, pady=10)
+        label.pack()
         
-        # 콜백 함수 호출
-        if self.refresh_callback:
-            self.refresh_callback()
+        # 다이얼로그 크기와 위치 계산
+        toast.update_idletasks()
+        dialog_width = self.dialog.winfo_width()
+        dialog_height = self.dialog.winfo_height()
+        dialog_x = self.dialog.winfo_rootx()
+        dialog_y = self.dialog.winfo_rooty()
         
+        toast_width = toast.winfo_width()
+        toast_height = toast.winfo_height()
+        
+        # 다이얼로그 하단 중앙에 배치
+        x = dialog_x + (dialog_width - toast_width) // 2
+        y = dialog_y + dialog_height - toast_height - 20
+        
+        toast.geometry(f"+{x}+{y}")
+        
+        # 2초 후 사라짐
+        self.dialog.after(2000, toast.destroy)
+    
+    def close_dialog(self):
+        """다이얼로그 닫기"""
         # 다이얼로그 닫기
         self.dialog.destroy()
 
