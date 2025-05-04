@@ -663,6 +663,17 @@ class GameInfoSearchDialog:
         
         ctk.CTkLabel(self.selected_image_frame, text="선택된 이미지:").pack(anchor="w", padx=5, pady=5)
         
+        # URL 직접 입력 프레임 추가
+        url_frame = ctk.CTkFrame(self.selected_image_frame)
+        url_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(url_frame, text="이미지 URL:").pack(side="left", padx=5)
+        self.url_entry = ctk.CTkEntry(url_frame, width=400)
+        self.url_entry.pack(side="left", padx=5, fill="x", expand=True)
+        
+        url_btn = ctk.CTkButton(url_frame, text="URL 사용", command=self.use_entered_url)
+        url_btn.pack(side="left", padx=5)
+        
         self.selected_image_label = ctk.CTkLabel(self.selected_image_frame, text="이미지를 선택하세요", image=None)
         self.selected_image_label.pack(pady=10)
         
@@ -702,6 +713,47 @@ class GameInfoSearchDialog:
         
         # 초기 검색 실행
         self.search_images()
+    
+    def use_entered_url(self):
+        """입력한 URL의 이미지 사용"""
+        url = self.url_entry.get().strip()
+        if not url:
+            self.show_error("URL을 입력해주세요.")
+            return
+            
+        if not url.startswith(('http://', 'https://')):
+            # URL이 @ 기호로 시작하면 제거 (잘못된 붙여넣기 등의 경우)
+            if url.startswith('@'):
+                url = url[1:]
+                
+            # 그래도 http로 시작하지 않으면 오류 표시
+            if not url.startswith(('http://', 'https://')):
+                self.show_error("유효한 URL을 입력해주세요. (http:// 또는 https://로 시작)")
+                return
+                
+        # 이미지 URL 확장자나 특수 패턴 체크
+        is_image_url = (
+            url.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')) or
+            'encrypted-tbn0.gstatic.com' in url or  # 구글 썸네일 이미지
+            'proxy.php?image=' in url or  # 프록시 이미지
+            'pimpandhost.com' in url  # 이미지 호스팅 사이트
+        )
+        
+        if not is_image_url:
+            # 확장자가 없을 경우에도 일단 시도
+            confirm = SafeCTkMessagebox(
+                master=self.dialog,
+                title="확인",
+                message="이미지 URL이 아닐 수 있습니다. 계속 진행하시겠습니까?",
+                icon="question",
+                option_1="아니오",
+                option_2="예"
+            )
+            if confirm.get() != "예":
+                return
+                
+        # 이미지 선택 처리
+        self.select_image(url)
     
     def search_images(self, event=None):
         """이미지 검색 실행"""
@@ -913,34 +965,45 @@ class GameInfoSearchDialog:
         self.selected_image_url = img_url
         
         try:
+            # 이미지 다운로드 시 User-Agent 헤더 추가 (일부 사이트에서 차단 방지)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/'
+            }
+            
             # 이미지 다운로드
-            response = requests.get(img_url, stream=True)
+            response = requests.get(img_url, stream=True, headers=headers, timeout=10)
             response.raise_for_status()
             
             # 이미지 데이터를 메모리에 로드
             img_data = BytesIO(response.content)
-            pil_img = Image.open(img_data)
-            
-            # 이미지 크기 조정
-            pil_img = resize_image_maintain_aspect(pil_img, (200, 200))
-            
-            # CTkImage로 변환
-            ctk_img = ctk.CTkImage(
-                light_image=pil_img,
-                dark_image=pil_img,
-                size=(pil_img.width, pil_img.height)
-            )
-            
-            # 선택된 이미지 표시
-            self.selected_image_label.configure(image=ctk_img, text="")
-            self.selected_image_label.image = ctk_img  # 참조 유지
-            
-            # 이미지 저장
-            self.save_selected_image(pil_img)
+            try:
+                pil_img = Image.open(img_data)
+                
+                # 이미지 크기 조정
+                pil_img = resize_image_maintain_aspect(pil_img, (200, 200))
+                
+                # CTkImage로 변환
+                ctk_img = ctk.CTkImage(
+                    light_image=pil_img,
+                    dark_image=pil_img,
+                    size=(pil_img.width, pil_img.height)
+                )
+                
+                # 선택된 이미지 표시
+                self.selected_image_label.configure(image=ctk_img, text="")
+                self.selected_image_label.image = ctk_img  # 참조 유지
+                
+                # 이미지 저장
+                self.save_selected_image(pil_img)
+            except Exception as img_error:
+                self.show_error(f"이미지 형식 오류: {img_error}")
             
         except Exception as e:
             self.show_error(f"이미지 선택 중 오류 발생: {e}")
-    
+            
     def save_selected_image(self, pil_img):
         """선택한 이미지를 저장"""
         try:
@@ -951,8 +1014,17 @@ class GameInfoSearchDialog:
             # 이미지 저장 경로
             img_path = os.path.join(thumb_dir, "00.jpg")
             
-            # 이미지 저장
-            pil_img.save(img_path, 'JPEG', quality=85)
+            # 이미지 저장 (PNG로도 저장 시도)
+            try:
+                pil_img.save(img_path, 'JPEG', quality=85)
+            except Exception as jpeg_error:
+                # JPEG 저장 실패 시 PNG로 시도
+                try:
+                    png_path = os.path.join(thumb_dir, "00.png")
+                    pil_img.save(png_path, 'PNG')
+                    img_path = png_path
+                except Exception as png_error:
+                    raise Exception(f"이미지 저장 실패: JPEG - {jpeg_error}, PNG - {png_error}")
             
             # 저장된 경로 기록
             self.downloaded_image_path = img_path
@@ -960,6 +1032,7 @@ class GameInfoSearchDialog:
             print(f"이미지 저장 완료: {img_path}")
         except Exception as e:
             print(f"이미지 저장 실패: {e}")
+            self.show_error(f"이미지 저장 실패: {e}")
     
     def show_error(self, error_msg, loading_label=None):
         """오류 메시지 표시"""
