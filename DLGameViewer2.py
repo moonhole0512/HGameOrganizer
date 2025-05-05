@@ -736,7 +736,7 @@ class GameInfoSearchDialog:
     def __init__(self, parent, folder_name, folder_path, callback=None):
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"게임 정보 검색 - {folder_name}")
-        self.dialog.geometry("800x700")
+        self.dialog.geometry("800x870")
         
         # 모달 창으로 설정
         self.dialog.transient(parent)
