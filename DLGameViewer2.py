@@ -1266,7 +1266,7 @@ class GameViewerGUI:
     def __init__(self):
         self.window = ctk.CTk()
         self.window.title("DL Game Viewer")
-        self.window.geometry("800x600")
+        self.window.geometry("1000x1000")
         
         # DB 경로 설정
         self.db_path = "games.db"
