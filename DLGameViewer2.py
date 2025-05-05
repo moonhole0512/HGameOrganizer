@@ -285,12 +285,18 @@ class DLGameViewer:
             return None
 
     def get_exe_files(self, folder_path):
-        """폴더 내의 모든 exe 파일 목록을 찾습니다."""
+        """폴더 내의 모든 실행 파일 목록을 찾습니다."""
         exe_files = []
+        executable_extensions = ('.exe', '.swf')  # 기본 실행 가능한 파일 확장자 목록
+        
         for root, _, files in os.walk(folder_path):
             for file in files:
-                if file.lower().endswith('.exe'):
-                    # 전체 경로에서 folder_path를 제외한 상대 경로로 저장
+                # index.html 파일 체크
+                if file.lower() == 'index.html':
+                    relative_path = os.path.relpath(os.path.join(root, file), folder_path)
+                    exe_files.append(relative_path)
+                # 다른 실행 파일 체크
+                elif file.lower().endswith(executable_extensions):
                     relative_path = os.path.relpath(os.path.join(root, file), folder_path)
                     exe_files.append(relative_path)
         return json.dumps(exe_files, ensure_ascii=False)  # JSON 형식으로 저장
@@ -1698,9 +1704,14 @@ class GameViewerGUI:
             full_path = os.path.join(folder_path, exe_path)
             # 실행 파일이 있는 디렉토리를 작업 디렉토리로 설정
             working_dir = os.path.dirname(full_path)
+            
             try:
                 import subprocess
-                subprocess.Popen(full_path, cwd=working_dir)
+                # index.html인 경우 기본 브라우저로 실행
+                if exe_path.lower() == 'index.html':
+                    os.startfile(full_path)
+                else:
+                    subprocess.Popen(full_path, cwd=working_dir)
             except Exception as e:
                 SafeCTkMessagebox(
                     title="실행 오류",
@@ -1718,7 +1729,11 @@ class GameViewerGUI:
                 working_dir = os.path.dirname(full_path)
                 try:
                     import subprocess
-                    subprocess.Popen(full_path, cwd=working_dir)
+                    # index.html인 경우 기본 브라우저로 실행
+                    if dialog.selected_exe.lower() == 'index.html':
+                        os.startfile(full_path)
+                    else:
+                        subprocess.Popen(full_path, cwd=working_dir)
                 except Exception as e:
                     SafeCTkMessagebox(
                         title="실행 오류",
