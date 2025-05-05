@@ -384,7 +384,18 @@ class DLGameViewer:
         if self.no_exe_folders:
             print("\n실행 파일이 없는 폴더:")
             for folder in self.no_exe_folders:
-                print(f"- {folder}")
+                # 폴더 이름만 저장된 경우 전체 경로 찾기
+                full_path = None
+                for game_path in self.game_paths:
+                    temp_path = os.path.join(game_path, folder)
+                    if os.path.exists(temp_path):
+                        full_path = temp_path
+                        break
+                
+                if full_path:
+                    print(f"- {full_path}")
+                else:
+                    print(f"- {folder}")
                 
         #if self.skipped_folders:
         #    print("\n건너뛴 폴더:")
@@ -478,50 +489,26 @@ class GameInfoDialog:
                 entry.pack(fill="x", padx=5, pady=(0,5))
                 entry.insert("1.0", str(game[index]))
                 
-                # 이미지 표시 프레임
-                image_frame = ctk.CTkFrame(frame)
-                image_frame.pack(fill="x", padx=5, pady=5)
+                # URL 입력 프레임 추가
+                url_frame = ctk.CTkFrame(frame)
+                url_frame.pack(fill="x", padx=5, pady=5)
                 
-                # thumb_imgs 폴더의 이미지들 로드
-                thumb_dir = os.path.join(game[8], "thumb_imgs")  # game[8]은 folder_path
-                if os.path.exists(thumb_dir):
-                    images = []
-                    for img_file in sorted(os.listdir(thumb_dir)):
-                        if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                            img_path = os.path.join(thumb_dir, img_file)
-                            try:
-                                if os.path.exists(img_path):  # 파일 존재 여부 확인
-                                    # PIL 이미지 로드
-                                    pil_img = Image.open(img_path)
-                                    # 비율 유지하면서 크기 조정
-                                    pil_img = resize_image_maintain_aspect(pil_img, THUMBNAIL_SIZE)
-                                    
-                                    # CTkImage로 변환 (실제 크기 전달)
-                                    ctk_img = ctk.CTkImage(
-                                        light_image=pil_img, 
-                                        dark_image=pil_img, 
-                                        size=(pil_img.width, pil_img.height)
-                                    )
-                                    
-                                    # 이미지 버튼 생성
-                                    img_btn = ctk.CTkButton(
-                                        image_frame,
-                                        text="",
-                                        image=ctk_img,
-                                        width=THUMBNAIL_SIZE[0],
-                                        height=THUMBNAIL_SIZE[1],
-                                        command=lambda p=img_path, e=entry: self.select_cover_image(p, e)
-                                    )
-                                    img_btn.image = ctk_img  # 참조 유지
-                                    img_btn.pack(side="left", padx=2)
-                                    
-                                    # 현재 선택된 이미지에 테두리 표시
-                                    if img_path == game[7]:  # game[7]은 cover_image
-                                        img_btn.configure(border_width=2, border_color="blue")
-                                    
-                                    images.append(img_btn)
-                            except Exception as e:
-                                print(f"이미지 로드 실패 ({img_path}): {e}")
+                url_entry = ctk.CTkEntry(url_frame, placeholder_text="이미지 URL 입력...")
+                url_entry.pack(side="left", fill="x", expand=True, padx=(0,5))
+                
+                # 이미지 표시 프레임
+                self.image_frame = ctk.CTkFrame(frame)  # 클래스 멤버 변수로 저장
+                self.image_frame.pack(fill="x", padx=5, pady=5)
+                
+                add_url_btn = ctk.CTkButton(
+                    url_frame,
+                    text="URL로 이미지 추가",
+                    command=lambda e=entry, u=url_entry: self.add_image_from_url(e, u)
+                )
+                add_url_btn.pack(side="right")
+                
+                # 이미지 프레임 초기화
+                self.refresh_image_frame(entry, self.image_frame)
             else:
                 # 일반 필드
                 entry = ctk.CTkTextbox(frame, height=50)
@@ -615,6 +602,129 @@ class GameInfoDialog:
                     if isinstance(btn, ctk.CTkButton):
                         if btn.cget("command").__closure__[0].cell_contents == image_path:
                             btn.configure(border_width=2, border_color="blue")
+
+    def add_image_from_url(self, entry, url_entry):
+        """URL에서 이미지를 다운로드하여 저장"""
+        url = url_entry.get().strip()
+        if not url:
+            SafeCTkMessagebox(
+                master=self.dialog,
+                title="오류",
+                message="URL을 입력해주세요.",
+                icon="warning"
+            )
+            return
+            
+        if not url.startswith(('http://', 'https://')):
+            SafeCTkMessagebox(
+                master=self.dialog,
+                title="오류",
+                message="유효한 URL을 입력해주세요. (http:// 또는 https://로 시작)",
+                icon="warning"
+            )
+            return
+        
+        try:
+            # 이미지 다운로드
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # 이미지 데이터를 메모리에 로드
+            img_data = BytesIO(response.content)
+            pil_img = Image.open(img_data)
+            
+            # thumb_imgs 폴더 생성
+            thumb_dir = os.path.join(self.game[8], "thumb_imgs")  # game[8]은 folder_path
+            os.makedirs(thumb_dir, exist_ok=True)
+            
+            # 다음 사용 가능한 이미지 번호 찾기
+            existing_files = [f for f in os.listdir(thumb_dir) if f.endswith(('.jpg', '.jpeg', '.png'))]
+            next_num = 0
+            while f"{next_num:02d}.jpg" in existing_files:
+                next_num += 1
+            
+            # 이미지 저장
+            img_path = os.path.join(thumb_dir, f"{next_num:02d}.jpg")
+            pil_img.save(img_path, 'JPEG', quality=85)
+            
+            # 텍스트박스 내용 갱신
+            entry.delete("1.0", "end")
+            entry.insert("1.0", img_path)
+            
+            # URL 입력창 초기화
+            url_entry.delete(0, "end")
+            
+            # 성공 메시지
+            SafeCTkMessagebox(
+                master=self.dialog,
+                title="성공",
+                message=f"이미지가 저장되었습니다: {img_path}",
+                icon="check"
+            )
+            
+            # 이미지 프레임 갱신
+            self.refresh_image_frame(entry, self.image_frame)
+            
+        except Exception as e:
+            SafeCTkMessagebox(
+                master=self.dialog,
+                title="오류",
+                message=f"이미지 다운로드 중 오류가 발생했습니다:\n{str(e)}",
+                icon="cancel"
+            )
+    
+    def refresh_image_frame(self, entry, image_frame):
+        """이미지 프레임 갱신"""
+        # 기존 이미지 버튼 제거
+        for widget in image_frame.winfo_children():
+            widget.destroy()
+        
+        # thumb_imgs 폴더의 이미지들 로드
+        thumb_dir = os.path.join(self.game[8], "thumb_imgs")  # game[8]은 folder_path
+        if os.path.exists(thumb_dir):
+            images = []
+            for img_file in sorted(os.listdir(thumb_dir)):
+                if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    img_path = os.path.join(thumb_dir, img_file)
+                    try:
+                        if os.path.exists(img_path):  # 파일 존재 여부 확인
+                            # PIL 이미지 로드
+                            pil_img = Image.open(img_path)
+                            # 비율 유지하면서 크기 조정
+                            pil_img = resize_image_maintain_aspect(pil_img, THUMBNAIL_SIZE)
+                            
+                            # CTkImage로 변환 (실제 크기 전달)
+                            ctk_img = ctk.CTkImage(
+                                light_image=pil_img, 
+                                dark_image=pil_img, 
+                                size=(pil_img.width, pil_img.height)
+                            )
+                            
+                            # 이미지 버튼 생성
+                            img_btn = ctk.CTkButton(
+                                image_frame,
+                                text="",
+                                image=ctk_img,
+                                width=THUMBNAIL_SIZE[0],
+                                height=THUMBNAIL_SIZE[1],
+                                command=lambda p=img_path, e=entry: self.select_cover_image(p, e)
+                            )
+                            img_btn.image = ctk_img  # 참조 유지
+                            img_btn.pack(side="left", padx=2)
+                            
+                            # 현재 선택된 이미지에 테두리 표시
+                            if img_path == entry.get("1.0", "end-1c"):
+                                img_btn.configure(border_width=2, border_color="blue")
+                            
+                            images.append(img_btn)
+                    except Exception as e:
+                        print(f"이미지 로드 실패 ({img_path}): {e}")
 
 class GameInfoSearchDialog:
     def __init__(self, parent, folder_name, folder_path, callback=None):
@@ -1584,8 +1694,19 @@ class GameViewerGUI:
         
         if len(exe_list) == 1:
             # 실행 파일이 하나만 있는 경우
-            full_path = os.path.join(folder_path, exe_list[0])
-            os.startfile(full_path)
+            exe_path = exe_list[0]
+            full_path = os.path.join(folder_path, exe_path)
+            # 실행 파일이 있는 디렉토리를 작업 디렉토리로 설정
+            working_dir = os.path.dirname(full_path)
+            try:
+                import subprocess
+                subprocess.Popen(full_path, cwd=working_dir)
+            except Exception as e:
+                SafeCTkMessagebox(
+                    title="실행 오류",
+                    message=f"게임 실행 중 오류가 발생했습니다:\n{str(e)}",
+                    icon="cancel"
+                )
         else:
             # 여러 개의 실행 파일이 있는 경우
             dialog = ExeSelectionDialog(self.window, exe_list, game_id)
@@ -1593,7 +1714,17 @@ class GameViewerGUI:
             
             if dialog.selected_exe:
                 full_path = os.path.join(folder_path, dialog.selected_exe)
-                os.startfile(full_path)
+                # 실행 파일이 있는 디렉토리를 작업 디렉토리로 설정
+                working_dir = os.path.dirname(full_path)
+                try:
+                    import subprocess
+                    subprocess.Popen(full_path, cwd=working_dir)
+                except Exception as e:
+                    SafeCTkMessagebox(
+                        title="실행 오류",
+                        message=f"게임 실행 중 오류가 발생했습니다:\n{str(e)}",
+                        icon="cancel"
+                    )
 
     def highlight_frame(self, frame, game):
         # 이전에 선택된 프레임이 있다면 원래 상태로 복원
@@ -1704,11 +1835,14 @@ class GameViewerGUI:
         if not self.selected_frame:
             return
         
-        if event.char == 'i':
+        # 키 입력을 소문자로 변환하여 비교
+        key = event.char.lower()
+        
+        if key == 'i':
             # 선택된 프레임에서 직접 게임 데이터 가져오기
             if hasattr(self.selected_frame, 'game_data'):
                 GameInfoDialog(self.window, self.selected_frame.game_data, self.refresh_display)
-        elif event.char == 'f':
+        elif key == 'f':
             # 선택된 게임의 폴더 열기
             if hasattr(self.selected_frame, 'game_data'):
                 folder_path = self.selected_frame.game_data[8]  # folder_path는 인덱스 8
